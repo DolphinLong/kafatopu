@@ -48,7 +48,7 @@ const Sound = (() => {
       o.type = type;
       o.frequency.value = freq;
       g.gain.value = gain;
-      if (fadeOut) g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
+      if (fadeOut) g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + dur);
       o.connect(g).connect(ctx.destination);
       o.start();
       o.stop(ctx.currentTime + dur);
@@ -239,7 +239,13 @@ class Game {
     
     this.activeTimeouts.set(id, timeoutId);
     
-    
+    // Memory management - max 20 timeouts
+    if (this.activeTimeouts.size > 20) {
+      const firstKey = this.activeTimeouts.keys().next().value;
+      const firstTimeout = this.activeTimeouts.get(firstKey);
+      clearTimeout(firstTimeout);
+      this.activeTimeouts.delete(firstKey);
+    }
     
     return id;
   }
@@ -296,22 +302,11 @@ class Game {
     if (window.requestIdleCallback) {
       requestIdleCallback(processCallback);
     } else {
-
-// Acknowledge that we can't truly simulate idle time, just defer the callback.
-
-// The callback's internal loop based on deadline.timeRemaining() might still run
-
-// with the fake value, but at least it won't block the main thread indefinitely.
-
-	setTimeout(() => {
-
-	const fakeDeadline = { timeRemaining: () => Infinity, didTimeout: false }; // Indicate it's not a real idle period
-
-	processCallback(fakeDeadline);
-
-	}, 0); // Or 16ms
-
-	}
+      setTimeout(() => {
+        const fakeDeadline = { timeRemaining: () => 5 };
+        processCallback(fakeDeadline);
+      }, 16);
+    }
   }
 
   // --- Game Loop with Performance Optimization ---
@@ -565,21 +560,22 @@ class Game {
   /**
    * Handle game timer
    */
-   startLoop() {
-
-	if (this.isRunning) return;
-
-	this.isRunning = true;
-
-	this.frameCount = 0;
-
-	this.lastIdleTime = performance.now();
-
-	this._lastTime = performance.now(); // Initialize here
-
-	this.loop();
-
-	}
+  tickTime(){
+    try {
+      if (!this._lastTime) this._lastTime = performance.now();
+      const now = performance.now();
+      
+      if (now - this._lastTime >= 1000) {
+        this.timeLeft = Math.max(0, this.timeLeft - 1);
+        if (this.timeEl) this.timeEl.textContent = this.timeLeft;
+        this._lastTime = now;
+        
+        if (this.timeLeft === 0) this.endGame();
+      }
+    } catch (e) {
+      this.handleError("Time tick error", e);
+    }
+  }
     
   /**
    * Process player input
@@ -656,7 +652,7 @@ class Game {
         ai.onGround = false; 
         this.makeDust(ai);
       }
-      
+      ai.x = clamp(ai.x, ai.r + 20, this.canvas.width - ai.r - 20);
     } catch (e) {
       this.handleError("AI update error", e);
     }
