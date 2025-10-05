@@ -97,6 +97,15 @@ class Game {
     // Performance optimization: idle callback queue
     this.idleCallbacks = [];
     this.lastIdleTime = 0;
+    
+    // Performance monitoring
+    this.fps = 60;
+    this.frameTime = 0;
+    this.lastFrameTime = performance.now();
+    this.fpsHistory = [];
+    
+    // Settings persistence
+    this.settingsKey = 'slimeSoccerSettings';
 
     try {
       this.initializeGame();
@@ -296,22 +305,36 @@ class Game {
     if (window.requestIdleCallback) {
       requestIdleCallback(processCallback);
     } else {
-
-// Acknowledge that we can't truly simulate idle time, just defer the callback.
-
-// The callback's internal loop based on deadline.timeRemaining() might still run
-
-// with the fake value, but at least it won't block the main thread indefinitely.
-
-	setTimeout(() => {
-
-	const fakeDeadline = { timeRemaining: () => Infinity, didTimeout: false }; // Indicate it's not a real idle period
-
-	processCallback(fakeDeadline);
-
-	}, 0); // Or 16ms
-
-	}
+      setTimeout(() => {
+        const fakeDeadline = { 
+          timeRemaining: () => 16,
+          didTimeout: false 
+        };
+        processCallback(fakeDeadline);
+      }, 1);
+    }
+  }
+  
+  /**
+   * Calculate and update FPS counter
+   */
+  updateFPS() {
+    const now = performance.now();
+    const delta = now - this.lastFrameTime;
+    this.lastFrameTime = now;
+    
+    if (delta > 0) {
+      const currentFPS = 1000 / delta;
+      this.fpsHistory.push(currentFPS);
+      
+      if (this.fpsHistory.length > 60) {
+        this.fpsHistory.shift();
+      }
+      
+      const avgFPS = this.fpsHistory.reduce((a, b) => a + b, 0) / this.fpsHistory.length;
+      this.fps = Math.round(avgFPS);
+      this.frameTime = delta.toFixed(2);
+    }
   }
 
   // --- Game Loop with Performance Optimization ---
@@ -320,6 +343,8 @@ class Game {
     this.isRunning = true;
     this.frameCount = 0;
     this.lastIdleTime = performance.now();
+    this.lastFrameTime = performance.now();
+    this._lastTime = performance.now();
     this.loop();
   }
 
@@ -333,6 +358,7 @@ class Game {
     }
 
     try {
+      this.updateFPS();
       this.update();
       this.render();
       this.frameCount++;
@@ -355,6 +381,34 @@ class Game {
     this.animationFrameId = requestAnimationFrame(this.loop);
   }
 
+  // --- Settings Persistence ---
+  /**
+   * Load settings from localStorage
+   */
+  loadSettings() {
+    try {
+      const saved = localStorage.getItem(this.settingsKey);
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (e) {
+      console.warn("Failed to load settings:", e);
+    }
+    return null;
+  }
+  
+  /**
+   * Save settings to localStorage
+   */
+  saveSettings(mode, gravity, difficulty, theme) {
+    try {
+      const settings = { mode, gravity, difficulty, theme };
+      localStorage.setItem(this.settingsKey, JSON.stringify(settings));
+    } catch (e) {
+      console.warn("Failed to save settings:", e);
+    }
+  }
+  
   // --- Game State Management ---
   /**
    * Start new game with specified settings
@@ -371,6 +425,9 @@ class Game {
       this.gravitySetting = gravity;
       this.setDifficulty(diff); 
       this.theme = theme;
+      
+      // Save settings
+      this.saveSettings(mode, gravity, diff, theme);
       
       // UI updates
       this.menu?.classList.add('hidden');
@@ -565,21 +622,22 @@ class Game {
   /**
    * Handle game timer
    */
-   startLoop() {
-
-	if (this.isRunning) return;
-
-	this.isRunning = true;
-
-	this.frameCount = 0;
-
-	this.lastIdleTime = performance.now();
-
-	this._lastTime = performance.now(); // Initialize here
-
-	this.loop();
-
-	}
+  tickTime(){
+    try {
+      if (!this._lastTime) this._lastTime = performance.now();
+      const now = performance.now();
+      
+      if (now - this._lastTime >= 1000) {
+        this.timeLeft = Math.max(0, this.timeLeft - 1);
+        if (this.timeEl) this.timeEl.textContent = this.timeLeft;
+        this._lastTime = now;
+        
+        if (this.timeLeft === 0) this.endGame();
+      }
+    } catch (e) {
+      this.handleError("Time tick error", e);
+    }
+  }
     
   /**
    * Process player input
@@ -1310,7 +1368,19 @@ class Game {
   bindUI(){
     const startBtn = document.getElementById('startBtn');
     const modeSelect = document.getElementById('modeSelect');
+    const gravitySelect = document.getElementById('gravitySelect');
+    const difficultySelect = document.getElementById('difficultySelect');
+    const themeSelect = document.getElementById('themeSelect');
     const difficultyRow = document.getElementById('difficultyRow');
+
+    // Load saved settings
+    const saved = this.loadSettings();
+    if (saved) {
+      if (modeSelect && saved.mode) modeSelect.value = saved.mode;
+      if (gravitySelect && saved.gravity) gravitySelect.value = saved.gravity;
+      if (difficultySelect && saved.difficulty) difficultySelect.value = saved.difficulty;
+      if (themeSelect && saved.theme) themeSelect.value = saved.theme;
+    }
 
     if (modeSelect && difficultyRow) {
       const syncDifficultyVisibility = () => {
